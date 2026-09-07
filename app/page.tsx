@@ -1,67 +1,168 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import Sidebar from "@/components/Sidebar";
+import { ChatInput } from "@/components/ChatInput";
+import ChatThread from "@/components/ChatThread";
+import { PanelLeftOpen, PenLine } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export interface Message {
+  role: "user" | "assistant";
+  text: string;
+  imagePreviews?: string[]; 
+  coordinates?: any;
+  agentMetadata?: { tool_used: string; images_processed: number }; 
+  isLoading?: boolean;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: number;
+}
 
 export default function Home() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+
+  const generateTitle = (text: string) => {
+    const cleanText = text.replace(/[^a-zA-Z0-9 ]/g, "").trim();
+    const words = cleanText.split(" ");
+    if (words.length <= 4) return cleanText;
+    return words.slice(0, 4).join(" ") + "...";
+  };
+
+  const handleSendMessage = async (text: string, imageFiles: File[], imagePreviewUrls: string[]) => {
+    
+    // NEW: Intercept requests with no images instantly
+    if (imageFiles.length === 0) {
+      alert("Please upload at least one satellite image for the AI to analyze.");
+      return;
+    }
+
+    const userMsg: Message = { role: "user", text, imagePreviews: imagePreviewUrls.length > 0 ? imagePreviewUrls : undefined };
+    const loadingMsg: Message = { role: "assistant", text: "", isLoading: true };
+
+    let currentChatId = activeChatId;
+
+    if (!currentChatId) {
+      currentChatId = Date.now().toString();
+      const newTitle = generateTitle(text) || "New Analysis";
+      
+      const newSession: ChatSession = {
+        id: currentChatId,
+        title: newTitle,
+        messages: [userMsg, loadingMsg],
+        createdAt: Date.now(),
+      };
+      
+      setChatSessions((prev) => [newSession, ...prev]);
+      setActiveChatId(currentChatId);
+    } else {
+      setChatSessions((prev) => 
+        prev.map(chat => 
+          chat.id === currentChatId 
+            ? { ...chat, messages: [...chat.messages, userMsg, loadingMsg] }
+            : chat
+        )
+      );
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("question", text);
+      
+      imageFiles.forEach(file => {
+        formData.append("files", file);
+      });
+
+      const res = await fetch("https://unpretty-keira-nonenigmatic.ngrok-free.dev/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error("Failed to fetch analysis");
+      const data = await res.json();
+
+      setChatSessions((prev) => 
+        prev.map(chat => {
+          if (chat.id === currentChatId) {
+            const updatedMessages = [...chat.messages];
+            updatedMessages[updatedMessages.length - 1] = {
+              role: "assistant",
+              text: data.text_response,
+              coordinates: data.coordinates,
+              agentMetadata: data.agent_metadata 
+            };
+            return { ...chat, messages: updatedMessages };
+          }
+          return chat;
+        })
+      );
+
+    } catch (error) {
+      console.error(error);
+      setChatSessions((prev) => 
+        prev.map(chat => {
+          if (chat.id === currentChatId) {
+            const updatedMessages = [...chat.messages];
+            updatedMessages[updatedMessages.length - 1] = {
+              role: "assistant",
+              text: "Sorry, there was an error processing this request. Ensure the backend is running and you uploaded at least 1 image.",
+              isLoading: false
+            };
+            return { ...chat, messages: updatedMessages };
+          }
+          return chat;
+        })
+      );
+    }
+  };
+
+  const activeSession = chatSessions.find(chat => chat.id === activeChatId);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex h-screen w-full bg-white dark:bg-[#090a0f] text-black dark:text-white overflow-hidden">
+      <aside className={cn("h-full shrink-0 transition-all duration-300 ease-in-out overflow-hidden border-r border-black/5 dark:border-white/5", isSidebarOpen ? "w-[260px]" : "w-0 border-transparent")}>
+        <Sidebar sessions={chatSessions} activeChatId={activeChatId} onClose={() => setIsSidebarOpen(false)} onSelectChat={(id) => setActiveChatId(id)} />
+      </aside>
+
+      <main className="flex-1 flex flex-col h-full relative min-w-0 transition-all duration-300">
+        <header className="absolute top-0 left-0 right-0 p-3 flex items-center justify-between z-10 pointer-events-none">
+          <div className="flex items-center gap-2 pointer-events-auto">
+            {!isSidebarOpen && (
+              <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-black/50 dark:text-white/50 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors">
+                <PanelLeftOpen className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          <div className="pointer-events-auto">
+            {!isSidebarOpen && (
+              <button onClick={() => setActiveChatId(null)} className="p-2 text-black/50 dark:text-white/50 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors">
+                <PenLine className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-hidden flex flex-col relative w-full h-full">
+          {activeSession ? (
+            <ChatThread messages={activeSession.messages} /> 
+          ) : (
+            <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
+              <div className="text-center max-w-lg space-y-3 transform -translate-y-8">
+                <h1 className="text-[28px] font-semibold text-black/90 dark:text-white/90 tracking-tight">Good morning.</h1>
+                <p className="text-black/50 dark:text-white/50 text-base font-medium">Upload up to 2 images for multitemporal or cross-modal analysis.</p>
+              </div>
+            </div>
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="w-full absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white to-transparent dark:from-[#090a0f] dark:via-[#090a0f] pt-10">
+          <ChatInput onSend={handleSendMessage} />
         </div>
       </main>
     </div>
