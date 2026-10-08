@@ -1,162 +1,356 @@
-"use client";
+'use client';
 
-import { useState, useRef, useEffect } from "react";
-import { MoreHorizontal, Copy, Download, Share2, RefreshCw, Check, PenLine, Loader2, Sparkles } from "lucide-react";
-import { Message } from "@/app/page";
+import React, { useRef, useEffect, useState } from 'react';
+import {
+  Copy,
+  Check,
+  ThumbsUp,
+  RotateCcw,
+  Image as ImageIcon,
+  FileText,
+  MapPin,
+  Database,
+  Eye,
+  Crop
+} from 'lucide-react';
+import SatelliteEmblem from '@/components/SatelliteEmblem';
+import { ChatMessage, Attachment } from '@/lib/types';
+import { EvidenceModal } from '@/components/EvidenceModal';
+import { ImageRegionSelector } from '@/components/ImageRegionSelector';
 
 interface ChatThreadProps {
-  messages: Message[];
+  messages: ChatMessage[];
+  onRerun?: (messageIndex: number) => void;
+  onRegionQuery?: (question: string, box: { ymin: number; xmin: number; ymax: number; xmax: number }, imageUrl: string) => void;
 }
 
-export default function ChatThread({ messages }: ChatThreadProps) {
-  const endOfMessagesRef = useRef<HTMLDivElement>(null);
+export default function ChatThread({
+  messages,
+  onRerun,
+  onRegionQuery
+}: ChatThreadProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [likedIds, setLikedIds] = useState<Record<string, boolean>>({});
+
+  // Modal States
+  const [evidenceModalMsgId, setEvidenceModalMsgId] = useState<string | null>(null);
+  const [regionSelectorUrl, setRegionSelectorUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const toggleLike = (id: string) => {
+    setLikedIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const renderContent = (content: string) => {
+    if (!content) return null;
+    const lines = content.split('\n');
+    return (
+      <div className="space-y-2 text-xs sm:text-[14px]">
+        {lines.map((line, idx) => {
+          if (line.startsWith('### ')) {
+            return (
+              <h3 key={idx} className="font-semibold text-sm sm:text-base text-zinc-900 dark:text-zinc-100 pt-1 pb-0.5">
+                {line.replace('### ', '')}
+              </h3>
+            );
+          }
+          if (line.startsWith('• ') || line.startsWith('- ')) {
+            const rawText = line.replace(/^[•-]\s+/, '');
+            return (
+              <div key={idx} className="flex items-start gap-2 pl-1">
+                <span className="text-blue-600 dark:text-blue-400 mt-1.5 w-1.5 h-1.5 rounded-full bg-current shrink-0" />
+                <span className="flex-1" dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(rawText) }} />
+              </div>
+            );
+          }
+          if (/^\d+\.\s+/.test(line)) {
+            const number = line.match(/^(\d+)\.\s+/)?.[1];
+            const text = line.replace(/^\d+\.\s+/, '');
+            return (
+              <div key={idx} className="flex items-start gap-2 pl-1">
+                <span className="font-mono text-blue-600 dark:text-blue-400 font-medium shrink-0 text-xs mt-0.5">
+                  {number}.
+                </span>
+                <span className="flex-1" dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(text) }} />
+              </div>
+            );
+          }
+          if (line.trim() === '') {
+            return <div key={idx} className="h-1.5" />;
+          }
+          return (
+            <p key={idx} dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(line) }} />
+          );
+        })}
+      </div>
+    );
+  };
+
+  const formatInlineMarkdown = (text: string) => {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-zinc-900 dark:text-zinc-100">$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em class="italic text-zinc-600 dark:text-zinc-400">$1</em>')
+      .replace(/`(.*?)`/g, '<code class="px-1.5 py-0.5 rounded bg-zinc-200/80 dark:bg-zinc-800 font-mono text-[11px] text-blue-600 dark:text-blue-400 border border-zinc-300/60 dark:border-zinc-700">$1</code>');
+  };
+
+  const activeEvidenceMsg = messages.find(m => m.id === evidenceModalMsgId);
+
   return (
-    <div className="flex-1 overflow-y-auto w-full px-4 md:px-12 lg:px-24 py-8 space-y-10 pb-40">
+    <div className="max-w-4xl w-full mx-auto px-4 py-6 space-y-6 flex-1">
       {messages.map((msg, index) => {
-        const isUser = msg.role === "user";
-        
-        let imageContextForEvidence = undefined;
-        if (!isUser && msg.coordinates) {
-          for (let i = index - 1; i >= 0; i--) {
-            if (messages[i].imagePreviews && messages[i].imagePreviews!.length > 0) {
-              imageContextForEvidence = messages[i].imagePreviews![0]; // Draw on the first image
-              break;
-            }
+        const isUser = msg.role === 'user';
+        const isLiked = !!likedIds[msg.id];
+        const isLoading = msg.content === "Routing via Semantic Agent...";
+
+        if (isLoading) {
+          return (
+            <div key="loading-state" className="flex gap-3 sm:gap-4 justify-start animate-in fade-in">
+              <div className="w-8 h-8 rounded-xl bg-zinc-900 dark:bg-blue-600 text-zinc-50 dark:text-white flex items-center justify-center shrink-0 shadow-sm mt-1 animate-pulse">
+                <SatelliteEmblem size={15} />
+              </div>
+              <div className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 border border-zinc-200 dark:border-zinc-800 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center gap-2.5">
+                <span className="w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 animate-ping" />
+                <span className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
+                  Analyzing spectral bands &amp; geo-coordinates...
+                </span>
+              </div>
+            </div>
+          );
+        }
+
+        // Collect all attachments from message
+        const attachmentsList: Attachment[] = [];
+        if ((msg as any).attachments && Array.isArray((msg as any).attachments)) {
+          attachmentsList.push(...(msg as any).attachments);
+        } else if (msg.attachment) {
+          attachmentsList.push(msg.attachment);
+        }
+
+        let assistantInlineImage = null;
+        if (msg.output_images && msg.output_images.length > 0) {
+          if (msg.output_images.length === 2) {
+             assistantInlineImage = msg.output_images[1];
+          } else {
+             assistantInlineImage = msg.output_images[0];
           }
         }
 
-        return isUser ? (
-          <UserMessageRow key={index} msg={msg} />
-        ) : (
-          <AssistantMessageRow key={index} msg={msg} imageContext={imageContextForEvidence} />
-        );
-      })}
-      <div ref={endOfMessagesRef} />
-    </div>
-  );
-}
-
-function UserMessageRow({ msg }: { msg: Message }) {
-  const [hasCopied, setHasCopied] = useState(false);
-
-  return (
-    <div className="flex flex-col items-end gap-1 w-full group">
-      <div className="bg-black/5 dark:bg-white/10 text-black dark:text-white px-5 py-4 rounded-3xl rounded-tr-sm max-w-[85%] md:max-w-[70%] lg:max-w-[60%] shadow-sm">
-        
-        {/* Render Multiple Images if present */}
-        {msg.imagePreviews && msg.imagePreviews.length > 0 && (
-          <div className="flex gap-3 mb-4 overflow-x-auto">
-            {msg.imagePreviews.map((src, idx) => (
-              <img 
-                key={idx}
-                src={src} 
-                alt={`Uploaded ${idx + 1}`} 
-                className="rounded-xl h-40 w-auto object-cover shadow-sm border border-black/10 dark:border-white/10 shrink-0"
-              />
-            ))}
-          </div>
-        )}
-        <p className="text-[16px] leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-      </div>
-
-      <div className="flex items-center gap-1 mr-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-        <button onClick={() => { navigator.clipboard.writeText(msg.text); setHasCopied(true); setTimeout(() => setHasCopied(false), 2000); }} className="text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-          {hasCopied ? <Check className="w-4 h-4 text-green-600 dark:text-green-400" /> : <Copy className="w-4 h-4" />}
-        </button>
-        <button className="text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-          <PenLine className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AssistantMessageRow({ msg, imageContext }: { msg: Message, imageContext?: string }) {
-  const [hasCopied, setHasCopied] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setIsMenuOpen(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  return (
-    <div className="flex gap-4 w-full">
-      <div className="w-8 h-8 rounded-xl bg-black dark:bg-white flex items-center justify-center shrink-0 shadow-sm mt-1">
-        <span className="text-white dark:text-black text-xs font-bold">SQ</span>
-      </div>
-      
-      <div className="flex-1 space-y-4 pt-1 text-[16px] text-black/90 dark:text-white/90 leading-relaxed max-w-full">
-        {msg.isLoading ? (
-          <div className="flex items-center gap-3 text-black/50 dark:text-white/50 h-8">
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span className="text-sm font-medium animate-pulse">Routing via Semantic Agent...</span>
-          </div>
-        ) : (
-          <>
-            {/* Hackathon Flex: Show the Agent Tool Used */}
-            {msg.agentMetadata && (
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[12px] font-medium border border-blue-100 dark:border-blue-900/30 mb-2">
-                <Sparkles className="w-3.5 h-3.5" />
-                Routed via: {msg.agentMetadata.tool_used}
+        return (
+          <div
+            key={msg.id || index}
+            className={`flex gap-3 sm:gap-4 ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-200`}
+          >
+            {!isUser && (
+              <div className="w-8 h-8 rounded-xl bg-zinc-900 dark:bg-blue-600 text-zinc-50 dark:text-white flex items-center justify-center shrink-0 shadow-sm mt-1">
+                <SatelliteEmblem size={15} />
               </div>
             )}
 
-            <p className="whitespace-pre-wrap">{msg.text}</p>
-            
-            {msg.coordinates && imageContext && (
-              <div className="mt-4 relative w-full max-w-2xl overflow-hidden rounded-xl border border-black/10 dark:border-white/10 shadow-sm">
-                <div className="bg-black/5 dark:bg-white/5 p-2 text-xs font-semibold text-black/60 dark:text-white/60 uppercase tracking-wider border-b border-black/10 dark:border-white/10">
-                  Visual Evidence Locator
-                </div>
-                <div className="relative">
-                  <img src={imageContext} alt="Evidence Context" className="w-full h-auto block" />
-                  <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
-                    <rect
-                      y={`${msg.coordinates.ymin / 10}%`}
-                      x={`${msg.coordinates.xmin / 10}%`}
-                      height={`${(msg.coordinates.ymax - msg.coordinates.ymin) / 10}%`}
-                      width={`${(msg.coordinates.xmax - msg.coordinates.xmin) / 10}%`}
-                      fill="rgba(59, 130, 246, 0.2)" 
-                      stroke="#3b82f6" strokeWidth="3" strokeDasharray="4" rx="4"
+            <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-[88%] sm:max-w-[80%]`}>
+
+              <div className="text-[11px] text-zinc-500 dark:text-zinc-500 mb-1 px-1 flex items-center gap-2 font-mono">
+                <span className="font-medium text-zinc-800 dark:text-zinc-300">
+                  {isUser ? 'Earth Analyst' : 'SatQuery AI'}
+                </span>
+                <span>•</span>
+                <span>
+                  {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                </span>
+              </div>
+
+              <div
+                className={`px-4 py-3.5 rounded-2xl text-xs sm:text-[14px] leading-relaxed border ${
+                  isUser
+                    ? 'bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700/60 rounded-tr-sm shadow-sm'
+                    : 'bg-white dark:bg-[#1a1b1e] text-zinc-800 dark:text-zinc-100 border-zinc-200 dark:border-zinc-800 rounded-tl-sm shadow-sm'
+                }`}
+              >
+                {/* 1. Render All User Attachments inside User Prompt */}
+                {isUser && attachmentsList.length > 0 && (
+                  <div className="mb-3 space-y-2">
+                    {attachmentsList.map((att, aIdx) => {
+                      
+                      // Safely grab the URL without triggering the renderer bug
+                      let attUrl = att.previewUrl;
+                      if (!attUrl) attUrl = att.url;
+                      if (!attUrl && typeof att === 'string') attUrl = att;
+                      
+                      // Avoid regex and standard pipes to bypass markdown/copy-paste bugs
+                      const validExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.tiff'];
+                      const hasImageExt = (str?: string) => {
+                        if (!str) return false;
+                        const lower = str.toLowerCase();
+                        return validExts.some(ext => lower.endsWith(ext));
+                      };
+
+                      let isImage = false;
+                      if (att.type === 'image') {
+                        isImage = true;
+                      } else if (hasImageExt(attUrl)) {
+                        isImage = true;
+                      } else if (hasImageExt(att.name)) {
+                        isImage = true;
+                      }
+
+                      if (isImage && attUrl) {
+                        return (
+                          <div key={aIdx} className="inline-block mr-2">
+                            <img
+                              src={attUrl}
+                              alt={att.name || "Uploaded Satellite Patch"}
+                              className="rounded-lg max-h-56 object-cover border border-zinc-200 dark:border-zinc-700 w-auto shadow-sm"
+                            />
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div key={aIdx} className="p-2 rounded-xl border flex items-center gap-2.5 text-xs font-mono bg-zinc-200/50 border-zinc-300 dark:bg-zinc-900/60 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200">
+                            <div className="w-6 h-6 rounded-lg bg-black/5 dark:bg-white/10 flex items-center justify-center shrink-0">
+                              <FileText size={13} className="text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <span className="font-medium truncate flex-1">{att.name || "Document File"}</span>
+                            <span className="text-[10px] uppercase tracking-wider opacity-75 shrink-0 bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded">
+                              Indexed
+                            </span>
+                          </div>
+                        );
+                      }
+                    })}
+                  </div>
+                )}
+
+                {/* 2. Assistant Output Evidence Image with Crop Button */}
+                {!isUser && assistantInlineImage && (
+                  <div className="mb-3 relative group inline-block">
+                    <img
+                      src={assistantInlineImage}
+                      alt="Highlighted Analysis Output"
+                      className="rounded-lg max-h-64 object-cover border border-zinc-200 dark:border-zinc-700 w-auto shadow-sm"
                     />
-                  </svg>
-                </div>
+                    <button
+                      onClick={() => setRegionSelectorUrl(assistantInlineImage as string)}
+                      className="absolute bottom-2 right-2 flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/80 hover:bg-zinc-900 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-md"
+                      title="Select a region on this evidence to inspect"
+                    >
+                      <Crop size={13} />
+                      <span>Select Region</span>
+                    </button>
+                    <div className="absolute top-2 left-2 px-2 py-0.5 bg-black/70 backdrop-blur-sm text-white text-[10px] font-mono rounded-md shadow">
+                      {msg.output_images && msg.output_images.length === 2 ? 'Highlighted After Image' : 'Analysis Output'}
+                    </div>
+                  </div>
+                )}
+
+                {renderContent(msg.content)}
+
+                {/* Metrics Bar & Evidence Trigger */}
+                {!isUser && (
+                  <div className="mt-3 pt-2.5 border-t border-zinc-200/70 dark:border-zinc-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 flex items-center gap-1.5">
+                        <Database size={11} /> satquery-llava-7b
+                      </span>
+
+                      {msg.metrics?.crs && (
+                        <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1.5">
+                          <MapPin size={11} /> Routed via: {msg.metrics.crs}
+                        </span>
+                      )}
+                    </div>
+
+                    {msg.output_images && msg.output_images.length > 0 && (
+                      <button
+                        onClick={() => setEvidenceModalMsgId(msg.id)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors cursor-pointer shadow-sm"
+                        title="View Visual Evidence, Comparison Slider & Download PDF Report"
+                      >
+                        <Eye size={13} />
+                        <span>Evidence</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
 
-            <div className="flex items-center gap-2 pt-2 relative" ref={menuRef}>
-              <button onClick={() => { if(msg.text) { navigator.clipboard.writeText(msg.text); setHasCopied(true); setTimeout(() => setHasCopied(false), 2000); } }} title="Copy output" className="text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-                {hasCopied ? <Check className="w-4 h-4 text-green-600 dark:text-green-400" /> : <Copy className="w-4 h-4" />}
-              </button>
-              <button title="Regenerate" className="text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              
-              <button onClick={() => setIsMenuOpen(!isMenuOpen)} className={`text-black/40 dark:text-white/40 hover:text-black dark:hover:text-white p-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/10 transition-colors ${isMenuOpen ? 'bg-black/5 dark:bg-white/10 text-black dark:text-white' : ''}`}>
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-
-              {isMenuOpen && (
-                <div className="absolute top-12 left-20 w-48 bg-white dark:bg-[#1a1b1e] border border-black/10 dark:border-white/10 shadow-xl rounded-xl py-1.5 z-50 text-[13px] animate-in fade-in zoom-in-95 duration-100">
-                  <button className="flex items-center gap-2 w-full px-3 py-2 text-left text-black/70 dark:text-white/70 hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
-                    <Download className="w-4 h-4" /> Export to PDF
+              {!isUser && (
+                <div className="flex items-center gap-1.5 mt-1.5 px-1 text-zinc-400 dark:text-zinc-500">
+                  <button
+                    onClick={() => handleCopy(msg.id, msg.content)}
+                    className="p-1.5 rounded-lg hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    title="Copy analysis"
+                  >
+                    {copiedId === msg.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
                   </button>
+
+                  <button
+                    onClick={() => toggleLike(msg.id)}
+                    className={`p-1.5 rounded-lg hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer ${
+                      isLiked ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' : ''
+                    }`}
+                    title="Mark verified ground-truth"
+                  >
+                    <ThumbsUp size={13} className={isLiked ? 'fill-current' : ''} />
+                  </button>
+
+                  {onRerun && (
+                    <button
+                      onClick={() => onRerun(index)}
+                      className="p-1.5 rounded-lg hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                      title="Re-run classification"
+                    >
+                      <RotateCcw size={13} />
+                    </button>
+                  )}
                 </div>
               )}
             </div>
-          </>
-        )}
-      </div>
+
+            {isUser && (
+              <div className="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 flex items-center justify-center text-xs font-mono font-medium shrink-0 mt-1 shadow-sm border border-transparent dark:border-zinc-700">
+                AR
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Evidence Modal Popup Component */}
+      {activeEvidenceMsg && (
+        <EvidenceModal
+          isOpen={!!evidenceModalMsgId}
+          onClose={() => setEvidenceModalMsgId(null)}
+          taskType={activeEvidenceMsg.metrics?.crs || 'visual_qa'}
+          prompt={activeEvidenceMsg.content}
+          answer={activeEvidenceMsg.content}
+          outputImages={activeEvidenceMsg.output_images || []}
+        />
+      )}
+
+      {/* Image Region Selector Crop Modal */}
+      {regionSelectorUrl && (
+        <ImageRegionSelector
+          isOpen={!!regionSelectorUrl}
+          onClose={() => setRegionSelectorUrl(null)}
+          imageUrl={regionSelectorUrl}
+          onSubmitRegionQuery={(question, box) => {
+            if (onRegionQuery) {
+              onRegionQuery(question, box, regionSelectorUrl);
+            }
+          }}
+        />
+      )}
+
+      <div ref={bottomRef} className="h-4" />
     </div>
   );
 }

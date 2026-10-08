@@ -1,43 +1,57 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Enables Next.js dark mode via the HTML class */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Retaining your premium typography choices */
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #090a0f; /* Sleek dark theme background */
-    --foreground: #ededed;
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Removed global user-select: none to allow text highlighting in the chat */
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-  overflow: hidden; /* Locks body scroll for the chat layout */
-}
-
-/* Modern minimal scrollbar */
+/* 
+ * Custom scrollbars matching the new Zinc theme 
+ */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(150, 150, 150, 0.3);
+  background: #d4d4d8; /* zinc-300 */
   border-radius: 9999px;
 }
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46; /* zinc-700 */
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(150, 150, 150, 0.5);
+  background: #a1a1aa; /* zinc-400 */
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b; /* zinc-600 */
+}
+
+/* Custom ultra-thin scrollbar utility used in the Sidebar */
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #e4e4e7; /* zinc-200 */
+    border-radius: 4px;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #27272a; /* zinc-800 */
+  }
 }

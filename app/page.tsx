@@ -1,168 +1,87 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import Sidebar from "@/components/Sidebar";
-import { ChatInput } from "@/components/ChatInput";
-import ChatThread from "@/components/ChatThread";
-import { PanelLeftOpen, PenLine } from "lucide-react";
-import { cn } from "@/lib/utils";
-
-export interface Message {
-  role: "user" | "assistant";
-  text: string;
-  imagePreviews?: string[]; 
-  coordinates?: any;
-  agentMetadata?: { tool_used: string; images_processed: number }; 
-  isLoading?: boolean;
-}
-
-export interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: number;
-}
+import Sidebar from '@/components/Sidebar';
+import Header from '@/components/Header';
+import HeroAnimation from '@/components/HeroAnimation';
+import ChatThread from '@/components/ChatThread';
+import { ChatInput } from '@/components/ChatInput';
+import { useSatQuery } from '@/hooks/useSatQuery';
 
 export default function Home() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-
-  const generateTitle = (text: string) => {
-    const cleanText = text.replace(/[^a-zA-Z0-9 ]/g, "").trim();
-    const words = cleanText.split(" ");
-    if (words.length <= 4) return cleanText;
-    return words.slice(0, 4).join(" ") + "...";
-  };
-
-  const handleSendMessage = async (text: string, imageFiles: File[], imagePreviewUrls: string[]) => {
-    
-    // NEW: Intercept requests with no images instantly
-    if (imageFiles.length === 0) {
-      alert("Please upload at least one satellite image for the AI to analyze.");
-      return;
-    }
-
-    const userMsg: Message = { role: "user", text, imagePreviews: imagePreviewUrls.length > 0 ? imagePreviewUrls : undefined };
-    const loadingMsg: Message = { role: "assistant", text: "", isLoading: true };
-
-    let currentChatId = activeChatId;
-
-    if (!currentChatId) {
-      currentChatId = Date.now().toString();
-      const newTitle = generateTitle(text) || "New Analysis";
-      
-      const newSession: ChatSession = {
-        id: currentChatId,
-        title: newTitle,
-        messages: [userMsg, loadingMsg],
-        createdAt: Date.now(),
-      };
-      
-      setChatSessions((prev) => [newSession, ...prev]);
-      setActiveChatId(currentChatId);
-    } else {
-      setChatSessions((prev) => 
-        prev.map(chat => 
-          chat.id === currentChatId 
-            ? { ...chat, messages: [...chat.messages, userMsg, loadingMsg] }
-            : chat
-        )
-      );
-    }
-
-    try {
-      const formData = new FormData();
-      formData.append("question", text);
-      
-      imageFiles.forEach(file => {
-        formData.append("files", file);
-      });
-
-      const res = await fetch("https://unpretty-keira-nonenigmatic.ngrok-free.dev/api/analyze", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error("Failed to fetch analysis");
-      const data = await res.json();
-
-      setChatSessions((prev) => 
-        prev.map(chat => {
-          if (chat.id === currentChatId) {
-            const updatedMessages = [...chat.messages];
-            updatedMessages[updatedMessages.length - 1] = {
-              role: "assistant",
-              text: data.text_response,
-              coordinates: data.coordinates,
-              agentMetadata: data.agent_metadata 
-            };
-            return { ...chat, messages: updatedMessages };
-          }
-          return chat;
-        })
-      );
-
-    } catch (error) {
-      console.error(error);
-      setChatSessions((prev) => 
-        prev.map(chat => {
-          if (chat.id === currentChatId) {
-            const updatedMessages = [...chat.messages];
-            updatedMessages[updatedMessages.length - 1] = {
-              role: "assistant",
-              text: "Sorry, there was an error processing this request. Ensure the backend is running and you uploaded at least 1 image.",
-              isLoading: false
-            };
-            return { ...chat, messages: updatedMessages };
-          }
-          return chat;
-        })
-      );
-    }
-  };
-
-  const activeSession = chatSessions.find(chat => chat.id === activeChatId);
+  const {
+    backendUrl,
+    setBackendUrl,
+    sidebarOpen,
+    setSidebarOpen,
+    activeChatId,
+    sessions,
+    messages,
+    activeTool,
+    setActiveTool,
+    inputValue,         // <-- ADDED
+    setInputValue,      // <-- ADDED
+    startNewSession,
+    selectSession,
+    selectPrompt,
+    sendMessage,
+    rerunMessage,
+    sendRegionQuery
+  } = useSatQuery();
 
   return (
-    <div className="flex h-screen w-full bg-white dark:bg-[#090a0f] text-black dark:text-white overflow-hidden">
-      <aside className={cn("h-full shrink-0 transition-all duration-300 ease-in-out overflow-hidden border-r border-black/5 dark:border-white/5", isSidebarOpen ? "w-[260px]" : "w-0 border-transparent")}>
-        <Sidebar sessions={chatSessions} activeChatId={activeChatId} onClose={() => setIsSidebarOpen(false)} onSelectChat={(id) => setActiveChatId(id)} />
+    <div className="flex h-screen w-screen overflow-hidden bg-zinc-50 dark:bg-[#090a0f] text-zinc-900 dark:text-zinc-100 font-sans transition-colors duration-200">
+
+      <aside
+        className={`h-full shrink-0 transition-all duration-300 ease-in-out overflow-hidden border-r border-zinc-200/70 dark:border-zinc-800/80 ${sidebarOpen ? "w-[280px]" : "w-0 border-transparent"
+          }`}
+      >
+        <Sidebar
+          sessions={sessions}
+          activeChatId={activeChatId}
+          onClose={() => setSidebarOpen(false)}
+          onSelectChat={(id) => {
+            if (id) selectSession(id);
+            else startNewSession();
+          }}
+          backendUrl={backendUrl}
+          setBackendUrl={setBackendUrl}
+        />
       </aside>
 
-      <main className="flex-1 flex flex-col h-full relative min-w-0 transition-all duration-300">
-        <header className="absolute top-0 left-0 right-0 p-3 flex items-center justify-between z-10 pointer-events-none">
-          <div className="flex items-center gap-2 pointer-events-auto">
-            {!isSidebarOpen && (
-              <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-black/50 dark:text-white/50 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors">
-                <PanelLeftOpen className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-          <div className="pointer-events-auto">
-            {!isSidebarOpen && (
-              <button onClick={() => setActiveChatId(null)} className="p-2 text-black/50 dark:text-white/50 hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors">
-                <PenLine className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-        </header>
+      <main className="flex-1 flex flex-col h-full min-w-0 relative overflow-hidden bg-zinc-50 dark:bg-[#090a0f]">
 
-        <div className="flex-1 overflow-hidden flex flex-col relative w-full h-full">
-          {activeSession ? (
-            <ChatThread messages={activeSession.messages} /> 
-          ) : (
-            <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-4">
-              <div className="text-center max-w-lg space-y-3 transform -translate-y-8">
-                <h1 className="text-[28px] font-semibold text-black/90 dark:text-white/90 tracking-tight">Good morning.</h1>
-                <p className="text-black/50 dark:text-white/50 text-base font-medium">Upload up to 2 images for multitemporal or cross-modal analysis.</p>
-              </div>
+        <Header
+          isSidebarOpen={sidebarOpen}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          onNewSession={startNewSession}
+        />
+
+        <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col pt-14">
+          {messages.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center min-h-[420px]">
+              <HeroAnimation
+                onSelectPrompt={selectPrompt}
+                onSelectTool={setActiveTool}
+              />
             </div>
+          ) : (
+            <ChatThread
+              messages={messages}
+              onRegionQuery={(question, box, imageUrl) => {
+                sendRegionQuery(imageUrl, question, box);
+              }}
+            />
           )}
         </div>
 
-        <div className="w-full absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white to-transparent dark:from-[#090a0f] dark:via-[#090a0f] pt-10">
-          <ChatInput onSend={handleSendMessage} />
+        <div className="w-full shrink-0 bg-gradient-to-t from-zinc-50 via-zinc-50 to-transparent dark:from-[#090a0f] dark:via-[#090a0f] pt-6 z-10">
+          <ChatInput
+            activeTool={activeTool}
+            onSelectTool={setActiveTool}
+            value={inputValue}            // <-- ADDED
+            onChange={setInputValue}      // <-- ADDED
+            onSend={(text, files, urls) => sendMessage(text, files, null)}
+          />
         </div>
       </main>
     </div>

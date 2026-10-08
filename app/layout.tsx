@@ -1,20 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// 1. Configure the premium Sans font for the UI
+const plusJakartaSans = Plus_Jakarta_Sans({
+  variable: "--font-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// 2. Configure the Mono font for code blocks, coordinates, and metrics
+const jetBrainsMono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "SatQuery AI",
-  description: "Satellite Imagery Analysis Platform",
+  title: "SatQuery AI | Geospatial Agent",
+  description: "Interactive Vision-Language Assistant for Multimodal Remote Sensing Image Analysis.",
 };
 
 export default function RootLayout({
@@ -25,7 +29,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      className={`${plusJakartaSans.variable} ${jetBrainsMono.variable} dark antialiased`}
     >
       <body>{children}</body>
     </html>
